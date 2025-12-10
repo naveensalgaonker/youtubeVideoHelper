@@ -388,23 +388,21 @@ def retry_transcript(video_id):
         video_url = video_data['url']
         video_youtube_id = YouTubeHandler.extract_video_id(video_url)
         
-        # Check if multiple transcripts are available
+        # Check available transcripts and automatically select the best one
         available_transcripts = YouTubeHandler.get_available_transcripts(video_youtube_id)
         
-        if len(available_transcripts) > 1:
-            # Multiple transcripts - show selection UI
-            return jsonify({
-                'success': True,
-                'multiple_transcripts': True,
-                'transcripts': available_transcripts,
-                'video_id': video_id
-            })
-        elif len(available_transcripts) == 1:
-            # Single transcript - save it automatically
+        if len(available_transcripts) > 0:
+            # Automatically select best transcript: prefer manual over auto-generated
+            manual_transcripts = [t for t in available_transcripts if t['type'] == 'manual']
+            selected_transcript = manual_transcripts[0] if manual_transcripts else available_transcripts[0]
+            
+            # Save transcript automatically
             db.update_video_status(video_id, 'processing')
             
-            transcript = available_transcripts[0]
-            language_code = transcript['language']
+            language_code = selected_transcript['language']
+            language_name = selected_transcript['language_name']
+            
+            logger.info(f"Auto-selecting {selected_transcript['type']} transcript in {language_name} ({language_code})")
             
             # Get transcription for that language
             transcription_data = YouTubeHandler.get_transcription_by_language(video_youtube_id, language_code)
@@ -414,14 +412,14 @@ def retry_transcript(video_id):
                 video_db_id=video_id,
                 transcription=transcription_data['transcription_text'],
                 language=language_code,
-                source=transcript['type']
+                source=selected_transcript['type']
             )
             
             # Update status to completed
             db.update_video_status(video_id, 'completed')
             
             logger.info(f"Successfully saved transcript in {language_code} for video ID {video_id}")
-            return jsonify({'success': True, 'message': f'Transcript extracted successfully in {transcript["language_name"]}'})
+            return jsonify({'success': True, 'message': f'Transcript extracted successfully in {selected_transcript["language_name"]}'})
         
         # No transcripts found - try default behavior
         # Update status to processing
@@ -589,18 +587,19 @@ def bulk_generate_transcript():
                             success_count += 1
                     except:
                         db.update_video_status(video_db_id, 'failed')
-                elif len(transcripts) == 1:
-                    # Auto-save single transcript
-                    transcript = transcripts[0]
+                else:
+                    # Auto-select best transcript: prefer manual over auto-generated
+                    manual_transcripts = [t for t in transcripts if t['type'] == 'manual']
+                    selected_transcript = manual_transcripts[0] if manual_transcripts else transcripts[0]
+                    
                     transcription = handler.get_transcription_by_language(
                         video_data['video_id'],
-                        transcript['language']
+                        selected_transcript['language']
                     )
                     if transcription:
-                        db.insert_transcription(video_db_id, transcription, transcript['language'], transcript['type'])
+                        db.insert_transcription(video_db_id, transcription, selected_transcript['language'], selected_transcript['type'])
                         db.update_video_status(video_db_id, 'completed')
                         success_count += 1
-                # For multiple transcripts, skip and leave as processing (user must manually select)
                 
             except Exception as e:
                 logger.error(f"Error processing transcript for video {video_db_id}: {e}")

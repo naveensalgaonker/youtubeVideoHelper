@@ -61,7 +61,7 @@
                         <span>⏱️ {{ video.duration_seconds|format_duration }}</span>
                         <span>👤 {{ video.channel or 'Unknown' }}</span>
                         {% if video.created_at %}
-                        <span>📅 {{ video.created_at[:10] }}</span>
+                        <span>📅 {{ video.created_at.strftime('%Y-%m-%d') if video.created_at is not string else video.created_at[:10] }}</span>
                         {% endif %}
                     </div>
                     <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px;">

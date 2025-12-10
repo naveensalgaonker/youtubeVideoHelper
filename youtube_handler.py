@@ -319,6 +319,7 @@ class YouTubeHandler:
             for attempt in range(max_retries):
                 try:
                     # Try to get transcript in preferred languages
+                    transcript_found = False
                     for lang in preferred_languages:
                         try:
                             transcript_data = api.fetch(video_id, languages=[lang])
@@ -336,7 +337,32 @@ class YouTubeHandler:
                             logger.warning(f"Error getting transcript in {lang}: {str(e)}")
                             continue
                     
-                    # If preferred languages didn't work, try to get any available transcript
+                    # If preferred languages didn't work, get list of available transcripts
+                    # and use the first available one
+                    logger.info(f"Preferred languages {preferred_languages} not found, checking available transcripts...")
+                    available_transcripts = YouTubeHandler.get_available_transcripts(video_id)
+                    
+                    if available_transcripts:
+                        # Prefer manually created over auto-generated
+                        manual_transcripts = [t for t in available_transcripts if t['type'] == 'manual']
+                        auto_transcripts = [t for t in available_transcripts if t['type'] == 'auto-generated']
+                        
+                        first_transcript = manual_transcripts[0] if manual_transcripts else auto_transcripts[0]
+                        lang_code = first_transcript['language']
+                        lang_name = first_transcript['language_name']
+                        
+                        logger.info(f"Using available transcript in {lang_name} ({lang_code})")
+                        
+                        transcript_data = api.fetch(video_id, languages=[lang_code])
+                        text = YouTubeHandler._format_transcript(transcript_data.snippets)
+                        
+                        return {
+                            'transcription_text': text,
+                            'language': lang_code,
+                            'source': f'available ({lang_name})'
+                        }
+                    
+                    # Last resort: try without specifying language
                     transcript_data = api.fetch(video_id)
                     text = YouTubeHandler._format_transcript(transcript_data.snippets)
                     

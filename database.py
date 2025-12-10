@@ -384,7 +384,8 @@ class Database:
             
             if self.is_postgres:
                 cursor.execute("SELECT currval(pg_get_serial_sequence('videos', 'id'))")
-                video_db_id = cursor.fetchone()[0]
+                result = cursor.fetchone()
+                video_db_id = result[0] if isinstance(result, (list, tuple)) else result['currval']
             else:
                 video_db_id = cursor.lastrowid
             
@@ -407,15 +408,23 @@ class Database:
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
+            ph = self._param_placeholder()
             # Delete existing transcription for this video to avoid duplicates
-            cursor.execute("DELETE FROM transcriptions WHERE video_id = ?", (video_db_id,))
+            cursor.execute(f"DELETE FROM transcriptions WHERE video_id = {ph}", (video_db_id,))
             # Insert new transcription
-            cursor.execute("""
+            cursor.execute(f"""
                 INSERT INTO transcriptions (video_id, transcription_text, language, source)
-                VALUES (?, ?, ?, ?)
+                VALUES ({ph}, {ph}, {ph}, {ph})
             """, (video_db_id, transcription, language, source))
             conn.commit()
-            trans_id = cursor.lastrowid
+            
+            if self.is_postgres:
+                cursor.execute("SELECT currval(pg_get_serial_sequence('transcriptions', 'id'))")
+                result = cursor.fetchone()
+                trans_id = result[0] if isinstance(result, (list, tuple)) else result['currval']
+            else:
+                trans_id = cursor.lastrowid
+                
             logger.info(f"Inserted transcription for video ID {video_db_id}")
             return trans_id
     
@@ -435,15 +444,23 @@ class Database:
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
+            ph = self._param_placeholder()
             # Delete existing summary for this video to avoid duplicates
-            cursor.execute("DELETE FROM summaries WHERE video_id = ?", (video_db_id,))
+            cursor.execute(f"DELETE FROM summaries WHERE video_id = {ph}", (video_db_id,))
             # Insert new summary
-            cursor.execute("""
+            cursor.execute(f"""
                 INSERT INTO summaries (video_id, summary_text, category, ai_model)
-                VALUES (?, ?, ?, ?)
+                VALUES ({ph}, {ph}, {ph}, {ph})
             """, (video_db_id, summary, category, ai_model))
             conn.commit()
-            summary_id = cursor.lastrowid
+            
+            if self.is_postgres:
+                cursor.execute("SELECT currval(pg_get_serial_sequence('summaries', 'id'))")
+                result = cursor.fetchone()
+                summary_id = result[0] if isinstance(result, (list, tuple)) else result['currval']
+            else:
+                summary_id = cursor.lastrowid
+                
             logger.info(f"Inserted summary for video ID {video_db_id} - Category: {category}")
             return summary_id
     
@@ -474,10 +491,11 @@ class Database:
         """Update video processing status (pending, processing, completed, failed)."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            ph = self._param_placeholder()
+            cursor.execute(f"""
                 UPDATE videos 
-                SET status = ?, updated_at = CURRENT_TIMESTAMP 
-                WHERE id = ?
+                SET status = {ph}, updated_at = CURRENT_TIMESTAMP 
+                WHERE id = {ph}
             """, (status, video_db_id))
             conn.commit()
             logger.info(f"Updated video ID {video_db_id} status to: {status}")
@@ -486,7 +504,8 @@ class Database:
         """Get video data by YouTube video ID."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM videos WHERE video_id = ?", (video_id,))
+            ph = self._param_placeholder()
+            cursor.execute(f"SELECT * FROM videos WHERE video_id = {ph}", (video_id,))
             row = cursor.fetchone()
             return dict(row) if row else None
     
@@ -494,7 +513,8 @@ class Database:
         """Get video data by database ID."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM videos WHERE id = ?", (db_id,))
+            ph = self._param_placeholder()
+            cursor.execute(f"SELECT * FROM videos WHERE id = {ph}", (db_id,))
             row = cursor.fetchone()
             return dict(row) if row else None
     
@@ -502,8 +522,9 @@ class Database:
         """Get transcription for a video."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM transcriptions WHERE video_id = ? 
+            ph = self._param_placeholder()
+            cursor.execute(f"""
+                SELECT * FROM transcriptions WHERE video_id = {ph} 
                 ORDER BY created_at DESC LIMIT 1
             """, (video_db_id,))
             row = cursor.fetchone()
@@ -513,8 +534,9 @@ class Database:
         """Get summary for a video."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM summaries WHERE video_id = ? 
+            ph = self._param_placeholder()
+            cursor.execute(f"""
+                SELECT * FROM summaries WHERE video_id = {ph} 
                 ORDER BY created_at DESC LIMIT 1
             """, (video_db_id,))
             row = cursor.fetchone()
@@ -524,7 +546,8 @@ class Database:
         """Get complete video data including transcription and summary by YouTube video ID."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            ph = self._param_placeholder()
+            cursor.execute(f"""
                 SELECT 
                     v.*,
                     t.transcription_text as transcription,
@@ -536,7 +559,7 @@ class Database:
                 FROM videos v
                 LEFT JOIN transcriptions t ON v.id = t.video_id
                 LEFT JOIN summaries s ON v.id = s.video_id
-                WHERE v.video_id = ?
+                WHERE v.video_id = {ph}
                 ORDER BY t.created_at DESC, s.created_at DESC
                 LIMIT 1
             """, (video_id,))
@@ -547,7 +570,8 @@ class Database:
         """Get complete video data including transcription and summary by database ID."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            ph = self._param_placeholder()
+            cursor.execute(f"""
                 SELECT 
                     v.id,
                     v.video_id,
@@ -567,7 +591,7 @@ class Database:
                 FROM videos v
                 LEFT JOIN transcriptions t ON v.id = t.video_id
                 LEFT JOIN summaries s ON v.id = s.video_id
-                WHERE v.id = ?
+                WHERE v.id = {ph}
                 ORDER BY t.created_at DESC, s.created_at DESC
                 LIMIT 1
             """, (db_id,))
@@ -625,7 +649,8 @@ class Database:
         """List videos filtered by category and optionally by user."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            ph = self._param_placeholder()
+            cursor.execute(f"""
                 SELECT 
                     v.id,
                     v.video_id,
@@ -637,7 +662,7 @@ class Database:
                     v.created_at
                 FROM videos v
                 JOIN summaries s ON v.id = s.video_id
-                WHERE s.category = ?
+                WHERE s.category = {ph}
                 ORDER BY v.created_at DESC
             """, (category,))
             return [dict(row) for row in cursor.fetchall()]
@@ -646,7 +671,8 @@ class Database:
         """Search for videos by transcription content."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            ph = self._param_placeholder()
+            cursor.execute(f"""
                 SELECT 
                     v.id,
                     v.video_id,
@@ -658,7 +684,7 @@ class Database:
                 FROM videos v
                 JOIN transcriptions t ON v.id = t.video_id
                 LEFT JOIN summaries s ON v.id = s.video_id
-                WHERE t.transcription_text LIKE ?
+                WHERE t.transcription_text LIKE {ph}
                 ORDER BY v.created_at DESC
             """, (f"%{search_term}%",))
             return [dict(row) for row in cursor.fetchall()]
