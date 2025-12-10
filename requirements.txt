@@ -8,6 +8,13 @@ google-generativeai>=0.3.0
 
 # Database
 # sqlite3 is built-in
+psycopg2-binary>=2.9.0  # PostgreSQL adapter for production
+
+# Web Framework & Auth
+Flask>=3.0.0
+Flask-Login>=0.6.3  # User session management
+Flask-WTF>=1.2.0  # Form handling with CSRF protection
+Werkzeug>=3.0.0  # Password hashing (included with Flask)
 
 # Utilities
 python-dotenv>=1.0.0
@@ -17,8 +24,8 @@ tqdm>=4.66.0
 # Optional - for data export
 pandas>=2.0.0
 
-# Web UI
-Flask>=3.0.0
+# Production Server
+gunicorn>=21.2.0  # WSGI HTTP Server for production
 
 # Optional - for testing
 pytest>=7.4.0

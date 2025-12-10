@@ -1,6 +1,6 @@
 """
 Database module for storing YouTube video metadata, transcriptions, and summaries.
-Uses SQLite for persistent storage with transactional safety.
+Supports both SQLite (local) and PostgreSQL (production) with user authentication.
 """
 
 import sqlite3
@@ -9,16 +9,39 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
 import os
+from werkzeug.security import generate_password_hash, check_password_hash
 
 logger = logging.getLogger(__name__)
 
+# Database connection type detection
+try:
+    import psycopg2
+    import psycopg2.extras
+    POSTGRES_AVAILABLE = True
+except ImportError:
+    POSTGRES_AVAILABLE = False
+
 
 class Database:
-    """Handles all database operations for YouTube video data."""
+    """Handles all database operations for YouTube video data with multi-user support."""
     
-    def __init__(self, db_path: str = "youtube_videos.db"):
-        """Initialize database connection and create tables if needed."""
-        self.db_path = db_path
+    def __init__(self, db_url: str = None):
+        """Initialize database connection and create tables if needed.
+        
+        Args:
+            db_url: Database URL. If starts with 'postgresql://', uses PostgreSQL.
+                   Otherwise uses SQLite with the path as filename.
+        """
+        if db_url is None:
+            db_url = os.getenv('DATABASE_URL', 'youtube_videos.db')
+        
+        self.db_url = db_url
+        self.is_postgres = db_url.startswith('postgresql://') or db_url.startswith('postgres://')
+        
+        if self.is_postgres and not POSTGRES_AVAILABLE:
+            raise RuntimeError("PostgreSQL URL provided but psycopg2 not installed. Run: pip install psycopg2-binary")
+        
+        self.db_path = db_url if not self.is_postgres else None
         self._init_database()
     
     def _init_database(self):
@@ -26,84 +49,316 @@ class Database:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             
-            # Videos table
+            # Users table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id {} PRIMARY KEY {},
+                    username {} UNIQUE NOT NULL,
+                    password_hash {} NOT NULL,
+                    is_superuser BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """.format(
+                'SERIAL' if self.is_postgres else 'INTEGER',
+                '' if self.is_postgres else 'AUTOINCREMENT',
+                'VARCHAR(80)' if self.is_postgres else 'TEXT',
+                'VARCHAR(255)' if self.is_postgres else 'TEXT'
+            ))
+            
+            # User settings table for API keys
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_settings (
+                    id {} PRIMARY KEY {},
+                    user_id INTEGER NOT NULL,
+                    openai_api_key {},
+                    gemini_api_key {},
+                    ai_provider {} DEFAULT 'openai',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+            """.format(
+                'SERIAL' if self.is_postgres else 'INTEGER',
+                '' if self.is_postgres else 'AUTOINCREMENT',
+                'TEXT' if self.is_postgres else 'TEXT',
+                'TEXT' if self.is_postgres else 'TEXT',
+                'VARCHAR(20)' if self.is_postgres else 'TEXT'
+            ))
+            
+            # Videos table (now with user_id)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS videos (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    video_id TEXT UNIQUE NOT NULL,
-                    video_url TEXT UNIQUE NOT NULL,
-                    title TEXT NOT NULL,
+                    id {} PRIMARY KEY {},
+                    user_id INTEGER NOT NULL,
+                    video_id {} UNIQUE NOT NULL,
+                    video_url {} UNIQUE NOT NULL,
+                    title {} NOT NULL,
                     duration_seconds INTEGER,
-                    channel_name TEXT,
-                    upload_date TEXT,
-                    status TEXT DEFAULT 'pending',
+                    channel_name {},
+                    upload_date {},
+                    status {} DEFAULT 'pending',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
                 )
-            """)
+            """.format(
+                'SERIAL' if self.is_postgres else 'INTEGER',
+                '' if self.is_postgres else 'AUTOINCREMENT',
+                'VARCHAR(50)' if self.is_postgres else 'TEXT',
+                'TEXT' if self.is_postgres else 'TEXT',
+                'TEXT' if self.is_postgres else 'TEXT',
+                'TEXT' if self.is_postgres else 'TEXT',
+                'VARCHAR(50)' if self.is_postgres else 'TEXT',
+                'VARCHAR(20)' if self.is_postgres else 'TEXT'
+            ))
             
             # Transcriptions table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS transcriptions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id {} PRIMARY KEY {},
                     video_id INTEGER NOT NULL,
                     transcription_text TEXT NOT NULL,
-                    language TEXT,
-                    source TEXT,
+                    language {},
+                    source {},
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
                 )
-            """)
+            """.format(
+                'SERIAL' if self.is_postgres else 'INTEGER',
+                '' if self.is_postgres else 'AUTOINCREMENT',
+                'VARCHAR(10)' if self.is_postgres else 'TEXT',
+                'VARCHAR(50)' if self.is_postgres else 'TEXT'
+            ))
             
             # Summaries table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS summaries (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id {} PRIMARY KEY {},
                     video_id INTEGER NOT NULL,
                     summary_text TEXT NOT NULL,
-                    category TEXT,
-                    ai_model TEXT,
+                    category {},
+                    ai_model {},
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
                 )
-            """)
+            """.format(
+                'SERIAL' if self.is_postgres else 'INTEGER',
+                '' if self.is_postgres else 'AUTOINCREMENT',
+                'VARCHAR(100)' if self.is_postgres else 'TEXT',
+                'VARCHAR(50)' if self.is_postgres else 'TEXT'
+            ))
             
             # Create indices for faster queries
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_id ON videos(user_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_video_id ON videos(video_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_status ON videos(status)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_category ON summaries(category)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_settings ON user_settings(user_id)")
             
             conn.commit()
-            logger.info(f"Database initialized at {self.db_path}")
+            
+            # Create default superuser if not exists
+            self._create_default_superuser(conn)
+            
+            logger.info(f"Database initialized at {self.db_url}")
+    
+    def _create_default_superuser(self, conn):
+        """Create default superuser account if it doesn't exist."""
+        cursor = conn.cursor()
+        
+        # Check if superuser exists
+        if self.is_postgres:
+            cursor.execute("SELECT id FROM users WHERE username = %s", ('admin',))
+        else:
+            cursor.execute("SELECT id FROM users WHERE username = ?", ('admin',))
+        
+        if cursor.fetchone() is None:
+            # Create superuser with default credentials
+            # Use pbkdf2:sha256 method for compatibility with older Python versions
+            password_hash = generate_password_hash('admin123', method='pbkdf2:sha256')
+            if self.is_postgres:
+                cursor.execute("""
+                    INSERT INTO users (username, password_hash, is_superuser)
+                    VALUES (%s, %s, %s)
+                """, ('admin', password_hash, True))
+            else:
+                cursor.execute("""
+                    INSERT INTO users (username, password_hash, is_superuser)
+                    VALUES (?, ?, ?)
+                """, ('admin', password_hash, True))
+            
+            conn.commit()
+            logger.warning("Created default superuser - Username: admin, Password: admin123 - CHANGE THIS IMMEDIATELY!")
     
     @contextmanager
     def _get_connection(self):
         """Context manager for database connections."""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row  # Enable column access by name
-        try:
-            yield conn
-        finally:
-            conn.close()
+        if self.is_postgres:
+            conn = psycopg2.connect(self.db_url)
+            conn.set_session(autocommit=False)
+            # Use RealDictCursor for dict-like row access
+            try:
+                yield conn
+            finally:
+                conn.close()
+        else:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row  # Enable column access by name
+            try:
+                yield conn
+            finally:
+                conn.close()
     
-    def insert_video(self, video_data: Dict[str, Any]) -> int:
+    def _param_placeholder(self):
+        """Return the correct parameter placeholder for current database."""
+        return '%s' if self.is_postgres else '?'
+    
+    def _dict_from_row(self, row):
+        """Convert database row to dictionary."""
+        if row is None:
+            return None
+        if self.is_postgres:
+            return dict(row)
+        else:
+            return dict(row)
+    
+    # ============= USER MANAGEMENT METHODS =============
+    
+    def create_user(self, username: str, password: str, is_superuser: bool = False) -> int:
+        """Create a new user account.
+        
+        Args:
+            username: Unique username
+            password: Plain text password (will be hashed)
+            is_superuser: Whether user has superuser privileges
+            
+        Returns:
+            User ID of created user
         """
-        Insert a new video record.
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            # Use pbkdf2:sha256 method for compatibility with older Python versions
+            password_hash = generate_password_hash(password, method='pbkdf2:sha256')
+            
+            ph = self._param_placeholder()
+            cursor.execute(f"""
+                INSERT INTO users (username, password_hash, is_superuser)
+                VALUES ({ph}, {ph}, {ph})
+            """, (username, password_hash, is_superuser))
+            
+            if self.is_postgres:
+                cursor.execute("SELECT currval(pg_get_serial_sequence('users', 'id'))")
+                user_id = cursor.fetchone()[0]
+            else:
+                user_id = cursor.lastrowid
+            
+            conn.commit()
+            logger.info(f"Created user: {username} (ID: {user_id})")
+            return user_id
+    
+    def get_user_by_username(self, username: str) -> Optional[Dict[str, Any]]:
+        """Get user by username."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            ph = self._param_placeholder()
+            cursor.execute(f"SELECT * FROM users WHERE username = {ph}", (username,))
+            row = cursor.fetchone()
+            return self._dict_from_row(row)
+    
+    def get_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """Get user by ID."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            ph = self._param_placeholder()
+            cursor.execute(f"SELECT * FROM users WHERE id = {ph}", (user_id,))
+            row = cursor.fetchone()
+            return self._dict_from_row(row)
+    
+    def verify_password(self, username: str, password: str) -> Optional[Dict[str, Any]]:
+        """Verify user credentials and return user data if valid."""
+        user = self.get_user_by_username(username)
+        if user and check_password_hash(user['password_hash'], password):
+            return user
+        return None
+    
+    def get_user_settings(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """Get user settings including API keys."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            ph = self._param_placeholder()
+            cursor.execute(f"SELECT * FROM user_settings WHERE user_id = {ph}", (user_id,))
+            row = cursor.fetchone()
+            return self._dict_from_row(row)
+    
+    def update_user_settings(self, user_id: int, openai_key: str = None, 
+                            gemini_key: str = None, ai_provider: str = None):
+        """Update or create user settings."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            ph = self._param_placeholder()
+            
+            # Check if settings exist
+            cursor.execute(f"SELECT id FROM user_settings WHERE user_id = {ph}", (user_id,))
+            existing = cursor.fetchone()
+            
+            if existing:
+                # Update existing
+                updates = []
+                values = []
+                if openai_key is not None:
+                    updates.append(f"openai_api_key = {ph}")
+                    values.append(openai_key)
+                if gemini_key is not None:
+                    updates.append(f"gemini_api_key = {ph}")
+                    values.append(gemini_key)
+                if ai_provider is not None:
+                    updates.append(f"ai_provider = {ph}")
+                    values.append(ai_provider)
+                
+                if updates:
+                    updates.append(f"updated_at = CURRENT_TIMESTAMP")
+                    values.append(user_id)
+                    cursor.execute(f"""
+                        UPDATE user_settings 
+                        SET {', '.join(updates)}
+                        WHERE user_id = {ph}
+                    """, values)
+            else:
+                # Insert new
+                cursor.execute(f"""
+                    INSERT INTO user_settings (user_id, openai_api_key, gemini_api_key, ai_provider)
+                    VALUES ({ph}, {ph}, {ph}, {ph})
+                """, (user_id, openai_key or '', gemini_key or '', ai_provider or 'openai'))
+            
+            conn.commit()
+            logger.info(f"Updated settings for user ID {user_id}")
+    
+    # ============= VIDEO MANAGEMENT METHODS (NOW WITH USER FILTERING) =============
+    
+    def insert_video(self, video_data: Dict[str, Any], user_id: int = None) -> int:
+        """
+        Insert a new video record for a specific user.
         
         Args:
             video_data: Dictionary with keys: video_id, video_url, title, 
                        duration_seconds, channel_name, upload_date
+            user_id: ID of the user who owns this video (required for multi-user mode)
         
         Returns:
             Database ID of inserted video
         """
+        if user_id is None:
+            raise ValueError("user_id is required for inserting videos")
+        
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO videos (video_id, video_url, title, duration_seconds, 
+            ph = self._param_placeholder()
+            cursor.execute(f"""
+                INSERT INTO videos (user_id, video_id, video_url, title, duration_seconds, 
                                    channel_name, upload_date, status)
-                VALUES (?, ?, ?, ?, ?, ?, 'pending')
+                VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, 'pending')
             """, (
+                user_id,
                 video_data['video_id'],
                 video_data['video_url'],
                 video_data['title'],
@@ -112,8 +367,14 @@ class Database:
                 video_data.get('upload_date')
             ))
             conn.commit()
-            video_db_id = cursor.lastrowid
-            logger.info(f"Inserted video: {video_data['title']} (ID: {video_db_id})")
+            
+            if self.is_postgres:
+                cursor.execute("SELECT currval(pg_get_serial_sequence('videos', 'id'))")
+                video_db_id = cursor.fetchone()[0]
+            else:
+                video_db_id = cursor.lastrowid
+            
+            logger.info(f"Inserted video: {video_data['title']} (ID: {video_db_id}) for user {user_id}")
             return video_db_id
     
     def insert_transcription(self, video_db_id: int, transcription: str, 
@@ -299,17 +560,25 @@ class Database:
             row = cursor.fetchone()
             return dict(row) if row else None
     
-    def list_videos(self, limit: int = None) -> List[Dict[str, Any]]:
-        """List all videos with basic info (alias for list_all_videos)."""
-        return self.list_all_videos(limit=limit)
+    def list_videos(self, user_id: int = None, limit: int = None) -> List[Dict[str, Any]]:
+        """List videos with optional user filtering.
+        
+        Args:
+            user_id: If provided, only return videos for this user
+            limit: Maximum number of videos to return
+        """
+        return self.list_all_videos(user_id=user_id, limit=limit)
     
-    def list_all_videos(self, limit: int = None) -> List[Dict[str, Any]]:
-        """List all videos with their summaries."""
+    def list_all_videos(self, user_id: int = None, limit: int = None) -> List[Dict[str, Any]]:
+        """List all videos with their summaries, optionally filtered by user."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
+            ph = self._param_placeholder()
+            
             query = """
                 SELECT 
                     v.id,
+                    v.user_id,
                     v.video_id,
                     v.title,
                     v.channel_name as channel,
@@ -323,16 +592,23 @@ class Database:
                 FROM videos v
                 LEFT JOIN summaries s ON v.id = s.video_id
                 LEFT JOIN transcriptions t ON v.id = t.video_id
-                ORDER BY v.created_at DESC
             """
+            
+            params = []
+            if user_id is not None:
+                query += f" WHERE v.user_id = {ph}"
+                params.append(user_id)
+            
+            query += " ORDER BY v.created_at DESC"
+            
             if limit:
                 query += f" LIMIT {limit}"
             
-            cursor.execute(query)
+            cursor.execute(query, params)
             return [dict(row) for row in cursor.fetchall()]
     
-    def list_videos_by_category(self, category: str) -> List[Dict[str, Any]]:
-        """List videos filtered by category."""
+    def list_videos_by_category(self, category: str, user_id: int = None) -> List[Dict[str, Any]]:
+        """List videos filtered by category and optionally by user."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""

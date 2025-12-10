@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - YouTube Video Summarizer{% endblock %}
+
+{% block content %}
+<div style="margin: 20px 0;">
+    <a href="/" class="btn btn-secondary">← Back to List</a>
+</div>
+
+<div class="content-box">
+    <h2 style="margin-bottom: 20px;">⚙️ Settings</h2>
+    
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div style="padding: 15px; margin-bottom: 20px; border-radius: 6px; {% if category == 'error' %}background: #ffebee; color: #c62828;{% else %}background: #e8f5e9; color: #2e7d32;{% endif %}">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+    
+    <div style="margin-bottom: 40px;">
+        <h3 style="margin-bottom: 15px;">👤 Account Information</h3>
+        <div style="background: #f8f9fa; padding: 15px; border-radius: 6px;">
+            <p><strong>Username:</strong> {{ current_user.username }}</p>
+            <p><strong>Account Type:</strong> 
+                {% if current_user.is_superuser %}
+                    <span style="color: #c62828; font-weight: 600;">🔐 Superuser (Can see all data)</span>
+                {% else %}
+                    <span>Regular User</span>
+                {% endif %}
+            </p>
+            <p><strong>Member since:</strong> {{ current_user.created_at[:10] }}</p>
+        </div>
+    </div>
+    
+    <div style="margin-bottom: 40px;">
+        <h3 style="margin-bottom: 15px;">🤖 AI API Keys</h3>
+        <p style="color: #666; margin-bottom: 15px;">
+            Configure your personal API keys for AI summarization. These keys are stored securely and only used for your videos.
+        </p>
+        
+        <form method="POST" action="{{ url_for('settings') }}">
+            {{ form.hidden_tag() }}
+            
+            <div style="margin-bottom: 20px;">
+                <label for="openai_api_key" style="display: block; margin-bottom: 8px; font-weight: 600;">
+                    OpenAI API Key:
+                </label>
+                {{ form.openai_api_key(class="form-control", style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 14px; font-family: monospace;", placeholder="sk-...") }}
+                <small style="color: #666; display: block; margin-top: 5px;">
+                    Get your key from <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com</a>
+                </small>
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <label for="gemini_api_key" style="display: block; margin-bottom: 8px; font-weight: 600;">
+                    Google Gemini API Key:
+                </label>
+                {{ form.gemini_api_key(class="form-control", style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 14px; font-family: monospace;", placeholder="AIza...") }}
+                <small style="color: #666; display: block; margin-top: 5px;">
+                    Get your key from <a href="https://makersuite.google.com/app/apikey" target="_blank">Google AI Studio</a>
+                </small>
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <label for="ai_provider" style="display: block; margin-bottom: 8px; font-weight: 600;">
+                    Preferred AI Provider:
+                </label>
+                {{ form.ai_provider(class="form-control", style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 14px;") }}
+                <small style="color: #666; display: block; margin-top: 5px;">
+                    Choose which AI service to use for summarization
+                </small>
+            </div>
+            
+            <button type="submit" class="btn" style="margin-right: 10px;">
+                💾 Save Settings
+            </button>
+        </form>
+    </div>
+    
+    <div style="margin-bottom: 40px; padding: 20px; background: #ffebee; border-radius: 6px; border-left: 4px solid #c62828;">
+        <h3 style="margin-bottom: 15px; color: #c62828;">⚠️ Danger Zone</h3>
+        <p style="margin-bottom: 15px;">
+            Logging out will end your current session. You'll need to login again to access your videos.
+        </p>
+        <a href="{{ url_for('logout') }}" class="btn" style="background: #c62828; color: white;">
+            🚪 Logout
+        </a>
+    </div>
+</div>
+{% endblock %}

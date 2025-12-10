@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 class VideoProcessor:
     """Main processor for handling YouTube video batch operations."""
     
-    def __init__(self, skip_ai: bool = False):
+    def __init__(self, skip_ai: bool = False, user_id: int = None):
         """Initialize processor with database and handlers."""
         # Load environment variables
         load_dotenv()
@@ -42,6 +42,7 @@ class VideoProcessor:
         self.db = Database(db_path)
         self.youtube_handler = YouTubeHandler()
         self.skip_ai = skip_ai
+        self.user_id = user_id  # Store user_id for video ownership
         self.force_reprocess = False  # Can be set to force reprocessing of existing videos
         self.force_reprocess = False
         
@@ -101,6 +102,9 @@ class VideoProcessor:
                 video_db_id = existing['id']
                 self.db.update_video_status(video_db_id, 'processing')
             else:
+                # Add user_id to metadata before inserting
+                if self.user_id:
+                    metadata['user_id'] = self.user_id
                 video_db_id = self.db.insert_video(metadata)
                 self.db.update_video_status(video_db_id, 'processing')
             

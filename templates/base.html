@@ -330,14 +330,34 @@
         <div class="container">
             <h1>📺 YouTube Summarizer</h1>
             <nav>
-                <a href="/">Home</a>
-                <a href="/add">Add Videos</a>
-                <a href="/export">Export</a>
+                {% if current_user.is_authenticated %}
+                    <a href="/">Home</a>
+                    <a href="/add">Add Videos</a>
+                    <a href="/export">Export</a>
+                    <a href="/settings">⚙️ Settings</a>
+                    {% if current_user.is_superuser %}
+                        <span style="background: #c62828; padding: 4px 8px; border-radius: 4px; font-size: 0.8em;">ADMIN</span>
+                    {% endif %}
+                    <span style="opacity: 0.8; font-size: 0.9em;">{{ current_user.username }}</span>
+                {% else %}
+                    <a href="/login">Login</a>
+                    <a href="/register">Register</a>
+                {% endif %}
             </nav>
         </div>
     </header>
     
     <div class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div style="margin: 20px 0; padding: 15px; border-radius: 6px; {% if category == 'error' %}background: #ffebee; color: #c62828;{% else %}background: #e8f5e9; color: #2e7d32;{% endif %}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
         {% block content %}{% endblock %}
     </div>
     

@@ -1,0 +1,36 @@
+services:
+  # Web service
+  - type: web
+    name: youtube-summarizer
+    env: python
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: youtube-summarizer-db
+          property: connectionString
+      - key: WTF_CSRF_ENABLED
+        value: true
+    healthCheckPath: /login
+
+  # PostgreSQL Database
+  - type: pserv
+    name: youtube-summarizer-db
+    env: docker
+    plan: free
+    region: oregon
+    ipAllowList: []
+    databases:
+      - name: youtube_summarizer
+        user: youtube_user
+
+# Environment variables you'll need to add manually in Render dashboard:
+# - OPENAI_API_KEY (optional, users can add their own)
+# - GEMINI_API_KEY (optional, users can add their own)
+# - COOKIES_FILE_CONTENT (base64 encoded youtube cookies - optional)
