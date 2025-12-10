@@ -112,9 +112,13 @@ document.getElementById('addVideosForm').addEventListener('submit', async (e) =>
                 alert(`Removed ${result.duplicates_removed} duplicate URL(s)`);
             }
             
-            // Start polling for status
-            statusInterval = setInterval(checkStatus, 2000);
+            // Start polling for status and keep-alive ping
+            statusInterval = setInterval(() => {
+                checkStatus();
+                pingHealth(); // Keep server alive during processing
+            }, 2000);
             checkStatus(); // Check immediately
+            pingHealth(); // Ping immediately
             
         } else {
             alert('Error: ' + result.error);
@@ -164,6 +168,15 @@ async function checkStatus() {
         }
     } catch (error) {
         console.error('Error checking status:', error);
+    }
+}
+
+async function pingHealth() {
+    // Keep server alive by pinging health endpoint
+    try {
+        await fetch('/health');
+    } catch (error) {
+        console.error('Health ping failed:', error);
     }
 }
 </script>

@@ -345,6 +345,12 @@ def add_videos():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/health')
+def health_check():
+    """Health check endpoint to keep service alive during processing"""
+    return jsonify({'status': 'ok'}), 200
+
+
 @app.route('/status/<job_id>')
 @login_required
 def job_status(job_id):

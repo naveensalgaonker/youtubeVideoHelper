@@ -223,9 +223,17 @@ class Database:
         """Convert database row to dictionary."""
         if row is None:
             return None
+        
         if self.is_postgres:
-            return dict(row)
+            # PostgreSQL with RealDictCursor returns RealDictRow (dict-like)
+            # Convert datetime objects to strings for consistency
+            result = dict(row)
+            for key, value in result.items():
+                if isinstance(value, datetime):
+                    result[key] = value.isoformat()
+            return result
         else:
+            # SQLite returns Row objects
             return dict(row)
     
     # ============= USER MANAGEMENT METHODS =============
