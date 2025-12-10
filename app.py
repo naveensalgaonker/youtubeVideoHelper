@@ -23,8 +23,20 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Set up error log file specifically for video processing errors
+error_log_handler = logging.FileHandler('video_processing_errors.log')
+error_log_handler.setLevel(logging.ERROR)
+error_log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - [Video: %(video_id)s] - %(message)s')
+error_log_handler.setFormatter(error_log_formatter)
+
+# Create error logger
+error_logger = logging.getLogger('video_errors')
+error_logger.setLevel(logging.ERROR)
+error_logger.addHandler(error_log_handler)
 
 app = Flask(__name__)
 
@@ -346,6 +358,11 @@ def add_videos():
         
     except Exception as e:
         logger.error(f"Error adding videos: {e}")
+        error_logger.error(
+            f"Error in add_videos_process: {str(e)}",
+            extra={'video_id': 'batch_processing'},
+            exc_info=True
+        )
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -444,6 +461,11 @@ def retry_transcript(video_id):
         
     except Exception as e:
         logger.error(f"Error retrying transcript for video {video_id}: {e}")
+        error_logger.error(
+            f"Failed to retry transcript extraction: {str(e)}",
+            extra={'video_id': video_data.get('video_id', 'unknown') if 'video_data' in locals() else str(video_id)},
+            exc_info=True
+        )
         db.update_video_status(video_id, 'failed')
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -824,8 +846,20 @@ def process_video_worker():
                             processing_status[job_id]['completed'] += 1
                         else:
                             processing_status[job_id]['failed'] += 1
+                            # Log failure to error log
+                            video_id = YouTubeHandler.extract_video_id(url)
+                            error_logger.error(
+                                f"Failed to process video: {url}",
+                                extra={'video_id': video_id or 'unknown'}
+                            )
                 except Exception as e:
                     logger.error(f"Error processing {url}: {e}")
+                    video_id = YouTubeHandler.extract_video_id(url)
+                    error_logger.error(
+                        f"Exception during processing: {str(e)} | URL: {url}",
+                        extra={'video_id': video_id or 'unknown'},
+                        exc_info=True
+                    )
                     with processing_lock:
                         processing_status[job_id]['failed'] += 1
             
