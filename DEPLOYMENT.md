@@ -30,7 +30,28 @@ This application now supports multiple users with individual accounts and API ke
 pip install -r requirements.txt
 ```
 
-### 2. Run Locally (SQLite)
+### 2. Configure Environment Variables
+
+Copy the example environment file and update it:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and set:
+```bash
+SECRET_KEY=your-random-secret-key-here  # Required for session security
+FLASK_ENV=development
+OPENAI_API_KEY=your_key_here  # Optional - users can add their own
+GEMINI_API_KEY=your_key_here  # Optional - users can add their own
+```
+
+Generate a secure SECRET_KEY:
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+### 3. Run Locally (SQLite)
 
 ```bash
 python app.py
@@ -41,7 +62,7 @@ The app will start at `http://localhost:5001`
 - Database: `youtube_videos.db` (SQLite, created automatically)
 - Default superuser will be created on first run
 
-### 3. Test with PostgreSQL Locally (Optional)
+### 4. Test with PostgreSQL Locally (Optional)
 
 ```bash
 # Install PostgreSQL
@@ -86,10 +107,16 @@ python app.py
    - Deploy web service
    - Set up environment variables
 
-4. **Add Optional Environment Variables** (in Render Dashboard):
+4. **Add Required Environment Variables** (in Render Dashboard):
+   - `SECRET_KEY` - **REQUIRED**: Random secret key for session security
+     ```bash
+     # Generate a secure random key:
+     python -c "import secrets; print(secrets.token_hex(32))"
+     ```
+   - `FLASK_ENV` - Set to `production`
    - `OPENAI_API_KEY` - Optional default OpenAI key
    - `GEMINI_API_KEY` - Optional default Gemini key
-   - Note: Users can add their own keys in Settings
+   - Note: Users can add their own API keys in Settings
 
 5. **Access Your App**:
    - Render will provide a URL like: `https://youtube-summarizer-xxxx.onrender.com`

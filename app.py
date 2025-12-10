@@ -23,8 +23,21 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
+
+# Security configuration
+SECRET_KEY = os.getenv('SECRET_KEY')
+if not SECRET_KEY:
+    logger.warning("⚠️  SECRET_KEY not set! Using insecure default for development only.")
+    SECRET_KEY = 'dev-secret-key-change-in-production-INSECURE'
+
+app.config['SECRET_KEY'] = SECRET_KEY
 app.config['WTF_CSRF_ENABLED'] = True
+
+# Session cookie security settings
+app.config['SESSION_COOKIE_SECURE'] = os.getenv('FLASK_ENV') == 'production'  # HTTPS only in production
+app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JavaScript access
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF protection
+app.config['PERMANENT_SESSION_LIFETIME'] = 86400  # 24 hours
 
 # Initialize database
 DATABASE_URL = os.getenv('DATABASE_URL', 'youtube_videos.db')

@@ -102,10 +102,8 @@ class VideoProcessor:
                 video_db_id = existing['id']
                 self.db.update_video_status(video_db_id, 'processing')
             else:
-                # Add user_id to metadata before inserting
-                if self.user_id:
-                    metadata['user_id'] = self.user_id
-                video_db_id = self.db.insert_video(metadata)
+                # Pass user_id as a parameter, not in metadata
+                video_db_id = self.db.insert_video(metadata, user_id=self.user_id)
                 self.db.update_video_status(video_db_id, 'processing')
             
             print(f"📹 Processing: {metadata['title']}")
