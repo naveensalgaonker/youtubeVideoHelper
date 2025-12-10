@@ -37,8 +37,8 @@ class VideoProcessor:
         # Load environment variables
         load_dotenv()
         
-        # Initialize components
-        db_path = os.getenv("DATABASE_PATH", "youtube_videos.db")
+        # Initialize components - use DATABASE_URL (same as app.py)
+        db_path = os.getenv("DATABASE_URL", "youtube_videos.db")
         self.db = Database(db_path)
         self.youtube_handler = YouTubeHandler()
         self.skip_ai = skip_ai
