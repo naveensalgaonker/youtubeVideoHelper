@@ -15,20 +15,19 @@ services:
         fromDatabase:
           name: youtube-summarizer-db
           property: connectionString
+      - key: FLASK_ENV
+        value: production
       - key: WTF_CSRF_ENABLED
         value: true
     healthCheckPath: /login
 
-  # PostgreSQL Database
-  - type: pserv
-    name: youtube-summarizer-db
-    env: docker
+# PostgreSQL Database (at root level, not nested in services)
+databases:
+  - name: youtube-summarizer-db
+    databaseName: youtube_videos
+    user: youtube_user
     plan: free
     region: oregon
-    ipAllowList: []
-    databases:
-      - name: youtube_summarizer
-        user: youtube_user
 
 # Environment variables you'll need to add manually in Render dashboard:
 # - OPENAI_API_KEY (optional, users can add their own)
