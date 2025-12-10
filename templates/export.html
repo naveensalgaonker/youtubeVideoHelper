@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Export Data - YouTube Video Summarizer{% endblock %}
+
+{% block content %}
+<div style="margin: 20px 0;">
+    <a href="/" class="btn btn-secondary">← Back to List</a>
+</div>
+
+<div class="content-box">
+    <h2 style="margin-bottom: 20px;">📥 Export Data</h2>
+    
+    <div style="margin-bottom: 30px;">
+        <h3 style="margin-bottom: 15px;">Export All Transcriptions</h3>
+        <p style="color: #666; margin-bottom: 15px;">
+            Download all video transcriptions in a single text file. Each transcription includes the video name, URL, and full transcript.
+        </p>
+        <a href="/export/txt" class="btn">📄 Download as TXT</a>
+    </div>
+    
+    <div style="border-top: 2px solid #e0e0e0; padding-top: 30px;">
+        <h3 style="margin-bottom: 15px;">ℹ️ Export Information</h3>
+        <ul style="color: #666; line-height: 2;">
+            <li>TXT format includes all transcriptions with video metadata</li>
+            <li>Each video is clearly separated with headers</li>
+            <li>Perfect for bulk text analysis or archiving</li>
+            <li>File includes timestamp of export</li>
+        </ul>
+    </div>
+</div>
+
+<div class="content-box">
+    <h3 style="margin-bottom: 15px;">📊 Quick Stats</h3>
+    <div id="stats-container" style="color: #666;">
+        Loading statistics...
+    </div>
+</div>
+
+<script>
+    // Fetch and display stats
+    fetch('/api/stats')
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('stats-container').innerHTML = `
+                <ul style="line-height: 2;">
+                    <li><strong>Total Videos:</strong> ${data.total_videos}</li>
+                    <li><strong>Videos with Transcriptions:</strong> ${data.has_transcription}</li>
+                    <li><strong>Videos with Summaries:</strong> ${data.has_summary}</li>
+                    <li><strong>Completed:</strong> ${data.completed}</li>
+                    <li><strong>Failed:</strong> ${data.failed}</li>
+                </ul>
+            `;
+        })
+        .catch(error => {
+            document.getElementById('stats-container').innerHTML = 
+                '<p style="color: #c62828;">Error loading statistics</p>';
+        });
+</script>
+{% endblock %}

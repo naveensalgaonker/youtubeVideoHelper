@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+
+{% block title %}Add Videos - YouTube Video Summarizer{% endblock %}
+
+{% block content %}
+<div style="margin: 20px 0;">
+    <a href="/" class="btn btn-secondary">← Back to List</a>
+</div>
+
+<div class="content-box">
+    <h2 style="margin-bottom: 20px;">📥 Add YouTube Videos</h2>
+    
+    <form id="addVideosForm">
+        <div style="margin-bottom: 20px;">
+            <label for="urls" style="display: block; margin-bottom: 10px; font-weight: 600;">
+                YouTube URLs (one per line):
+            </label>
+            <textarea 
+                id="urls" 
+                name="urls" 
+                rows="10" 
+                style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 6px; font-family: monospace; font-size: 14px;"
+                placeholder="https://www.youtube.com/watch?v=...&#10;https://www.youtube.com/watch?v=...&#10;https://www.youtube.com/watch?v=..."
+                required
+            ></textarea>
+            <small style="color: #666; display: block; margin-top: 5px;">
+                Enter one URL per line. Duplicates will be automatically removed.
+            </small>
+        </div>
+        
+        <div style="margin-bottom: 20px;">
+            <label style="display: flex; align-items: center; cursor: pointer;">
+                <input type="checkbox" id="skip_ai" name="skip_ai" style="margin-right: 10px;" checked>
+                <span>Skip AI summarization (transcription only)</span>
+            </label>
+            <small style="color: #666; display: block; margin-top: 5px; margin-left: 30px;">
+                Enable this to avoid using API quota. Only metadata and transcriptions will be extracted.
+            </small>
+        </div>
+        
+        <button type="submit" class="btn" id="submitBtn">
+            🚀 Start Processing
+        </button>
+    </form>
+</div>
+
+<div id="statusBox" class="content-box" style="display: none; margin-top: 20px;">
+    <h3 style="margin-bottom: 15px;">⏳ Processing Status</h3>
+    
+    <div style="margin-bottom: 15px;">
+        <div style="background: #f8f9fa; padding: 15px; border-radius: 6px;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                <span><strong>Status:</strong> <span id="statusText">Queued</span></span>
+                <span><strong>Progress:</strong> <span id="progressText">0/0</span></span>
+            </div>
+            <div style="background: #e0e0e0; height: 20px; border-radius: 10px; overflow: hidden;">
+                <div id="progressBar" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); height: 100%; width: 0%; transition: width 0.3s;"></div>
+            </div>
+        </div>
+    </div>
+    
+    <div id="currentVideo" style="margin-top: 15px; color: #666; font-size: 0.9em;">
+        <strong>Current:</strong> <span id="currentVideoText">-</span>
+    </div>
+    
+    <div style="margin-top: 15px;">
+        <div><strong>Completed:</strong> <span id="completedCount" style="color: #2e7d32;">0</span></div>
+        <div><strong>Failed:</strong> <span id="failedCount" style="color: #c62828;">0</span></div>
+    </div>
+    
+    <div id="completionMessage" style="display: none; margin-top: 20px; padding: 15px; background: #e8f5e9; border-radius: 6px; color: #2e7d32;">
+        <strong>✓ Processing Complete!</strong>
+        <div style="margin-top: 10px;">
+            <a href="/" class="btn">View All Videos</a>
+        </div>
+    </div>
+</div>
+
+<script>
+let jobId = null;
+let statusInterval = null;
+
+document.getElementById('addVideosForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const submitBtn = document.getElementById('submitBtn');
+    const formData = new FormData(e.target);
+    
+    // Disable form
+    submitBtn.disabled = true;
+    submitBtn.textContent = '⏳ Submitting...';
+    
+    try {
+        const response = await fetch('/add/process', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            jobId = result.job_id;
+            
+            // Show status box
+            document.getElementById('statusBox').style.display = 'block';
+            
+            // Hide form
+            document.getElementById('addVideosForm').style.display = 'none';
+            
+            // Show info
+            if (result.duplicates_removed > 0) {
+                alert(`Removed ${result.duplicates_removed} duplicate URL(s)`);
+            }
+            
+            // Start polling for status
+            statusInterval = setInterval(checkStatus, 2000);
+            checkStatus(); // Check immediately
+            
+        } else {
+            alert('Error: ' + result.error);
+            submitBtn.disabled = false;
+            submitBtn.textContent = '🚀 Start Processing';
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+        submitBtn.disabled = false;
+        submitBtn.textContent = '🚀 Start Processing';
+    }
+});
+
+async function checkStatus() {
+    if (!jobId) return;
+    
+    try {
+        const response = await fetch(`/status/${jobId}`);
+        const result = await response.json();
+        
+        if (result.success) {
+            const status = result.status;
+            
+            // Update UI
+            document.getElementById('statusText').textContent = status.status.charAt(0).toUpperCase() + status.status.slice(1);
+            document.getElementById('progressText').textContent = `${status.completed + status.failed}/${status.total}`;
+            document.getElementById('completedCount').textContent = status.completed;
+            document.getElementById('failedCount').textContent = status.failed;
+            
+            // Update progress bar
+            const progress = ((status.completed + status.failed) / status.total) * 100;
+            document.getElementById('progressBar').style.width = progress + '%';
+            
+            // Update current video
+            if (status.current) {
+                document.getElementById('currentVideoText').textContent = status.current;
+            } else {
+                document.getElementById('currentVideoText').textContent = '-';
+            }
+            
+            // Check if complete
+            if (status.status === 'completed') {
+                clearInterval(statusInterval);
+                document.getElementById('completionMessage').style.display = 'block';
+                document.getElementById('currentVideo').style.display = 'none';
+            }
+        }
+    } catch (error) {
+        console.error('Error checking status:', error);
+    }
+}
+</script>
+{% endblock %}

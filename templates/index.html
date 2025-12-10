@@ -1,0 +1,383 @@
+{% extends "base.html" %}
+
+{% block title %}Home - YouTube Video Summarizer{% endblock %}
+
+{% block content %}
+<div class="search-box">
+    <form action="/search" method="get">
+        <input type="text" name="q" placeholder="🔍 Search transcriptions..." required>
+    </form>
+</div>
+
+<div class="stats">
+    <div class="stat-card stat-filter active" data-filter="all" onclick="filterVideos('all')">
+        <h3>{{ stats.total }}</h3>
+        <p>Total Videos</p>
+    </div>
+    <div class="stat-card stat-filter" data-filter="completed" onclick="filterVideos('completed')">
+        <h3>{{ stats.completed }}</h3>
+        <p>Completed</p>
+    </div>
+    <div class="stat-card stat-filter" data-filter="processing" onclick="filterVideos('processing')">
+        <h3>{{ stats.processing }}</h3>
+        <p>Processing</p>
+    </div>
+    <div class="stat-card stat-filter" data-filter="failed" onclick="filterVideos('failed')">
+        <h3>{{ stats.failed }}</h3>
+        <p>Failed</p>
+    </div>
+</div>
+
+<div id="bulk-actions" style="display: none; margin: 20px 0; padding: 15px; background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+    <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+        <span id="selected-count" style="font-weight: 600;">0 videos selected</span>
+        <button class="btn-small" onclick="bulkGenerateTranscript()" id="bulk-transcript-btn">
+            🔄 Generate Transcripts
+        </button>
+        <button class="btn-small" onclick="bulkGenerateSummary()" id="bulk-summary-btn">
+            📝 Generate Summaries
+        </button>
+        <button class="btn-small" onclick="bulkDelete()" id="bulk-delete-btn" style="background: #dc3545;">
+            🗑️ Delete Videos
+        </button>
+        <button class="btn-small" onclick="clearSelection()" style="background: #6c757d;">
+            Clear Selection
+        </button>
+    </div>
+</div>
+
+<div class="video-list">
+    {% if videos %}
+        {% for video in videos %}
+        <div class="video-item" data-status="{{ video.status }}">
+            <div style="display: flex; align-items: flex-start; gap: 15px;">
+                <input type="checkbox" class="video-checkbox" data-video-id="{{ video.id }}" 
+                       onchange="updateBulkActions()" style="width: 18px; height: 18px; margin-top: 5px; cursor: pointer;">
+                <div style="flex: 1;">
+                    <div class="video-title">
+                        <a href="/video/{{ video.id }}">{{ video.title or 'Untitled Video' }}</a>
+                    </div>
+                    <div class="video-meta">
+                        <span>⏱️ {{ video.duration_seconds|format_duration }}</span>
+                        <span>👤 {{ video.channel or 'Unknown' }}</span>
+                        {% if video.created_at %}
+                        <span>📅 {{ video.created_at[:10] }}</span>
+                        {% endif %}
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px;">
+                        <div>
+                            {% if video.status == 'completed' %}
+                            <span class="status-badge status-completed">✓ Completed</span>
+                            {% elif video.status == 'processing' %}
+                            <span class="status-badge status-processing">⏳ Processing</span>
+                            {% elif video.status == 'failed' %}
+                            <span class="status-badge status-failed">✗ Failed</span>
+                            {% endif %}
+                            
+                            {% if video.category %}
+                            <span class="status-badge" style="background: #e3f2fd; color: #1565c0;">{{ video.category }}</span>
+                            {% endif %}
+                        </div>
+                        
+                        {% if video.status == 'failed' or not video.has_transcription %}
+                        <button class="btn-small" onclick="retryTranscript({{ video.id }})" id="retry-transcript-{{ video.id }}">
+                            🔄 Retry Transcript
+                        </button>
+                        {% endif %}
+                        
+                        {% if video.has_transcription and not video.has_summary %}
+                        <button class="btn-small" onclick="retrySummary({{ video.id }})" id="retry-summary-{{ video.id }}">
+                            🔄 Generate Summary
+                        </button>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="empty-state">
+            <h2>No videos yet</h2>
+            <p>Process some YouTube videos to see them here!</p>
+        </div>
+    {% endif %}
+</div>
+
+<script>
+let currentFilter = 'all';
+
+function filterVideos(status) {
+    currentFilter = status;
+    
+    // Update active state on filter cards
+    document.querySelectorAll('.stat-filter').forEach(card => {
+        card.classList.remove('active');
+    });
+    event.currentTarget.classList.add('active');
+    
+    // Filter video items
+    const videoItems = document.querySelectorAll('.video-item');
+    videoItems.forEach(item => {
+        if (status === 'all') {
+            item.style.display = '';
+        } else {
+            const itemStatus = item.getAttribute('data-status');
+            item.style.display = itemStatus === status ? '' : 'none';
+        }
+    });
+}
+
+function updateBulkActions() {
+    const checkboxes = document.querySelectorAll('.video-checkbox:checked');
+    const count = checkboxes.length;
+    const bulkActions = document.getElementById('bulk-actions');
+    const selectedCount = document.getElementById('selected-count');
+    
+    if (count > 0) {
+        bulkActions.style.display = 'block';
+        selectedCount.textContent = `${count} video${count > 1 ? 's' : ''} selected`;
+    } else {
+        bulkActions.style.display = 'none';
+    }
+}
+
+function getSelectedVideoIds() {
+    const checkboxes = document.querySelectorAll('.video-checkbox:checked');
+    return Array.from(checkboxes).map(cb => parseInt(cb.getAttribute('data-video-id')));
+}
+
+function clearSelection() {
+    document.querySelectorAll('.video-checkbox').forEach(cb => cb.checked = false);
+    updateBulkActions();
+}
+
+function bulkGenerateTranscript() {
+    const videoIds = getSelectedVideoIds();
+    if (videoIds.length === 0) return;
+    
+    if (!confirm(`Generate transcripts for ${videoIds.length} video(s)?`)) return;
+    
+    const btn = document.getElementById('bulk-transcript-btn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Processing...';
+    
+    fetch('/bulk/transcript', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({video_ids: videoIds})
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`Started transcript generation for ${videoIds.length} video(s)`);
+            window.location.reload();
+        } else {
+            alert('Error: ' + data.error);
+            btn.disabled = false;
+            btn.textContent = '🔄 Generate Transcripts';
+        }
+    })
+    .catch(error => {
+        alert('Network error: ' + error);
+        btn.disabled = false;
+        btn.textContent = '🔄 Generate Transcripts';
+    });
+}
+
+function bulkGenerateSummary() {
+    const videoIds = getSelectedVideoIds();
+    if (videoIds.length === 0) return;
+    
+    if (!confirm(`Generate summaries for ${videoIds.length} video(s)?`)) return;
+    
+    const btn = document.getElementById('bulk-summary-btn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Processing...';
+    
+    fetch('/bulk/summary', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({video_ids: videoIds})
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`Started summary generation for ${videoIds.length} video(s)`);
+            window.location.reload();
+        } else {
+            alert('Error: ' + data.error);
+            btn.disabled = false;
+            btn.textContent = '📝 Generate Summaries';
+        }
+    })
+    .catch(error => {
+        alert('Network error: ' + error);
+        btn.disabled = false;
+        btn.textContent = '📝 Generate Summaries';
+    });
+}
+
+function bulkDelete() {
+    const videoIds = getSelectedVideoIds();
+    if (videoIds.length === 0) return;
+    
+    if (!confirm(`⚠️ Delete ${videoIds.length} video(s)? This cannot be undone!`)) return;
+    
+    const btn = document.getElementById('bulk-delete-btn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Deleting...';
+    
+    fetch('/bulk/delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({video_ids: videoIds})
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`Deleted ${data.deleted} video(s)`);
+            window.location.reload();
+        } else {
+            alert('Error: ' + data.error);
+            btn.disabled = false;
+            btn.textContent = '🗑️ Delete Videos';
+        }
+    })
+    .catch(error => {
+        alert('Network error: ' + error);
+        btn.disabled = false;
+        btn.textContent = '🗑️ Delete Videos';
+    });
+}
+
+function retryTranscript(videoId) {
+    const btn = document.getElementById(`retry-transcript-${videoId}`);
+    btn.disabled = true;
+    btn.textContent = '⏳ Processing...';
+    
+    fetch(`/retry/transcript/${videoId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success && data.multiple_transcripts) {
+            // Multiple transcripts available - show selection dialog
+            showTranscriptSelection(videoId, data.transcripts);
+            btn.disabled = false;
+            btn.textContent = '🔄 Retry Transcript';
+        } else if (data.success) {
+            alert('✓ Transcript extracted successfully! Refreshing page...');
+            window.location.reload();
+        } else {
+            alert('✗ Error: ' + data.error);
+            btn.disabled = false;
+            btn.textContent = '🔄 Retry Transcript';
+        }
+    })
+    .catch(error => {
+        alert('✗ Network error: ' + error);
+        btn.disabled = false;
+        btn.textContent = '🔄 Retry Transcript';
+    });
+}
+
+function showTranscriptSelection(videoId, transcripts) {
+    let html = '<div style="margin-top: 10px; padding: 15px; background: #f8f9fa; border-radius: 6px;">';
+    html += '<h4 style="margin-bottom: 10px;">Multiple transcripts available. Select one:</h4>';
+    
+    transcripts.forEach((transcript, index) => {
+        const typeLabel = transcript.type === 'manual' ? 'MANUAL' : 'AUTO-GENERATED';
+        const typeBadge = transcript.type === 'manual' 
+            ? '<span style="background: #e8f5e9; color: #2e7d32; padding: 2px 8px; border-radius: 3px; font-size: 0.8em; margin-left: 5px;">✓ ' + typeLabel + '</span>'
+            : '<span style="background: #fff3e0; color: #ef6c00; padding: 2px 8px; border-radius: 3px; font-size: 0.8em; margin-left: 5px;">⚙ ' + typeLabel + '</span>';
+        
+        html += `<button class="btn-small" style="display: block; width: 100%; margin-bottom: 8px; text-align: left;" 
+                 onclick="selectTranscript(${videoId}, '${transcript.language}', '${transcript.language_name}')">
+                 ${transcript.language_name} (${transcript.language})${typeBadge}
+                 </button>`;
+    });
+    
+    html += '</div>';
+    
+    // Find the video item and append the selection UI
+    const videoItem = document.getElementById(`retry-transcript-${videoId}`).closest('.video-item');
+    
+    // Remove any existing selection UI
+    const existingSelection = videoItem.querySelector('.transcript-selection');
+    if (existingSelection) {
+        existingSelection.remove();
+    }
+    
+    const selectionDiv = document.createElement('div');
+    selectionDiv.className = 'transcript-selection';
+    selectionDiv.innerHTML = html;
+    videoItem.appendChild(selectionDiv);
+}
+
+function selectTranscript(videoId, languageCode, languageName) {
+    const videoItem = document.getElementById(`retry-transcript-${videoId}`).closest('.video-item');
+    const selectionDiv = videoItem.querySelector('.transcript-selection');
+    
+    if (selectionDiv) {
+        selectionDiv.innerHTML = '<p style="padding: 15px; background: #f8f9fa; border-radius: 6px;">⏳ Extracting transcript in ' + languageName + '...</p>';
+    }
+    
+    fetch(`/get/transcript/${videoId}/${languageCode}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('✓ Transcript in ' + languageName + ' extracted successfully! Refreshing page...');
+            window.location.reload();
+        } else {
+            alert('✗ Error: ' + data.error);
+            if (selectionDiv) {
+                selectionDiv.remove();
+            }
+        }
+    })
+    .catch(error => {
+        alert('✗ Network error: ' + error);
+        if (selectionDiv) {
+            selectionDiv.remove();
+        }
+    });
+}
+
+function retrySummary(videoId) {
+    const btn = document.getElementById(`retry-summary-${videoId}`);
+    btn.disabled = true;
+    btn.textContent = '⏳ Processing...';
+    
+    fetch(`/retry/summary/${videoId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('✓ Summary generated successfully! Refreshing page...');
+            window.location.reload();
+        } else {
+            alert('✗ Error: ' + data.error);
+            btn.disabled = false;
+            btn.textContent = '🔄 Generate Summary';
+        }
+    })
+    .catch(error => {
+        alert('✗ Network error: ' + error);
+        btn.disabled = false;
+        btn.textContent = '🔄 Generate Summary';
+    });
+}
+</script>
+{% endblock %}

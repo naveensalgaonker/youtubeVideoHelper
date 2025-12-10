@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}Search Results - YouTube Video Summarizer{% endblock %}
+
+{% block content %}
+<div style="margin: 20px 0;">
+    <a href="/" class="btn btn-secondary">← Back to List</a>
+</div>
+
+<div class="content-box">
+    <h2>Search Results for "{{ query }}"</h2>
+    <p style="color: #666; margin-top: 10px;">Found {{ results|length }} result(s)</p>
+</div>
+
+<div class="video-list">
+    {% if results %}
+        {% for video in results %}
+        <div class="video-item">
+            <div class="video-title">
+                <a href="/video/{{ video.id }}">{{ video.title or 'Untitled Video' }}</a>
+            </div>
+            <div class="video-meta">
+                <span>⏱️ {{ video.duration_seconds|format_duration }}</span>
+                <span>👤 {{ video.channel or 'Unknown' }}</span>
+            </div>
+            {% if video.transcription %}
+            <div style="margin-top: 10px; color: #666; font-size: 0.9em;">
+                {{ video.transcription[:200] }}...
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="empty-state">
+            <h2>No results found</h2>
+            <p>Try searching with different keywords.</p>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

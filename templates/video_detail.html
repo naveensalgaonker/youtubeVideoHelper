@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+
+{% block title %}{{ video.title }} - YouTube Video Summarizer{% endblock %}
+
+{% block content %}
+<div style="margin: 20px 0;">
+    <a href="/" class="btn btn-secondary">← Back to List</a>
+</div>
+
+<div class="content-box">
+    <h2 style="margin-bottom: 15px;">{{ video.title or 'Untitled Video' }}</h2>
+    
+    <div class="video-meta" style="margin-bottom: 20px;">
+        <span>⏱️ Duration: {{ video.duration_seconds|format_duration }}</span>
+        <span>👤 Channel: {{ video.channel or 'Unknown' }}</span>
+        {% if video.upload_date %}
+        <span>📅 Uploaded: {{ video.upload_date }}</span>
+        {% endif %}
+    </div>
+    
+    <div style="margin-bottom: 20px;">
+        {% if video.status == 'completed' %}
+        <span class="status-badge status-completed">✓ Completed</span>
+        {% elif video.status == 'processing' %}
+        <span class="status-badge status-processing">⏳ Processing</span>
+        {% elif video.status == 'failed' %}
+        <span class="status-badge status-failed">✗ Failed</span>
+        {% endif %}
+        
+        {% if video.category %}
+        <span class="status-badge" style="background: #e3f2fd; color: #1565c0;">{{ video.category }}</span>
+        {% endif %}
+        
+        {% if video.status == 'failed' or not video.transcription %}
+        <button class="btn-small" onclick="retryTranscript({{ video.id }})" id="retry-transcript-btn" style="margin-left: 10px;">
+            🔄 Retry Transcript
+        </button>
+        {% endif %}
+        
+        {% if video.transcription and not video.summary %}
+        <button class="btn-small" onclick="retrySummary({{ video.id }})" id="retry-summary-btn" style="margin-left: 10px;">
+            🔄 Generate Summary
+        </button>
+        {% endif %}
+    </div>
+    
+    <div style="margin-top: 20px;">
+        <strong>Video URL:</strong> <a href="{{ video.url }}" target="_blank">{{ video.url }}</a>
+    </div>
+    
+    {% if video.description %}
+    <div style="margin-top: 15px;">
+        <strong>Description:</strong>
+        <p style="margin-top: 5px; color: #666;">{{ video.description[:500] }}{% if video.description|length > 500 %}...{% endif %}</p>
+    </div>
+    {% endif %}
+</div>
+
+{% if video.summary %}
+<div class="content-box">
+    <h3 style="margin-bottom: 15px;">📝 Summary</h3>
+    <div style="background: #f8f9fa; padding: 15px; border-radius: 6px; line-height: 1.8;">
+        {{ video.summary }}
+    </div>
+</div>
+{% endif %}
+
+{% if video.transcription %}
+<div class="content-box">
+    <h3 style="margin-bottom: 15px;">📄 Full Transcription</h3>
+    <div class="transcription-text">{{ video.transcription }}</div>
+</div>
+{% else %}
+<div class="content-box">
+    <div class="empty-state">
+        <h3>No transcription available</h3>
+        <p>This video hasn't been transcribed yet.</p>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+<script>
+function retryTranscript(videoId) {
+    const btn = document.getElementById('retry-transcript-btn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Processing...';
+    
+    fetch(`/retry/transcript/${videoId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success && data.multiple_transcripts) {
+            // Multiple transcripts available - show selection dialog
+            showTranscriptSelection(videoId, data.transcripts);
+            btn.disabled = false;
+            btn.textContent = '🔄 Retry Transcript';
+        } else if (data.success) {
+            alert('✓ Transcript extracted successfully! Refreshing page...');
+            window.location.reload();
+        } else {
+            alert('✗ Error: ' + data.error);
+            btn.disabled = false;
+            btn.textContent = '🔄 Retry Transcript';
+        }
+    })
+    .catch(error => {
+        alert('✗ Network error: ' + error);
+        btn.disabled = false;
+        btn.textContent = '🔄 Retry Transcript';
+    });
+}
+
+function showTranscriptSelection(videoId, transcripts) {
+    let html = '<div class="content-box" id="transcript-selection-box">';
+    html += '<h3 style="margin-bottom: 15px;">📝 Multiple transcripts available - Select one:</h3>';
+    html += '<div style="display: grid; gap: 10px;">';
+    
+    transcripts.forEach((transcript, index) => {
+        const typeLabel = transcript.type === 'manual' ? 'MANUALLY CREATED' : 'AUTO-GENERATED';
+        const typeBadge = transcript.type === 'manual' 
+            ? '<span style="background: #e8f5e9; color: #2e7d32; padding: 4px 10px; border-radius: 4px; font-size: 0.85em; margin-left: 10px; font-weight: 600;">✓ ' + typeLabel + '</span>'
+            : '<span style="background: #fff3e0; color: #ef6c00; padding: 4px 10px; border-radius: 4px; font-size: 0.85em; margin-left: 10px; font-weight: 600;">⚙ ' + typeLabel + '</span>';
+        
+        const translatableBadge = transcript.is_translatable 
+            ? '<span style="background: #e3f2fd; color: #1565c0; padding: 4px 10px; border-radius: 4px; font-size: 0.85em; margin-left: 10px; font-weight: 600;">🌐 TRANSLATABLE</span>'
+            : '';
+        
+        html += `<button class="btn" style="text-align: left; padding: 15px; display: flex; align-items: center; justify-content: space-between;" 
+                 onclick="selectTranscript(${videoId}, '${transcript.language}', '${transcript.language_name}')">
+                 <span style="font-size: 1.1em;">${transcript.language_name} (${transcript.language})</span>
+                 <span>${typeBadge}${translatableBadge}</span>
+                 </button>`;
+    });
+    
+    html += '</div></div>';
+    
+    // Find where to insert the selection box (after the first content-box)
+    const firstContentBox = document.querySelector('.content-box');
+    const selectionBox = document.getElementById('transcript-selection-box');
+    
+    if (selectionBox) {
+        selectionBox.remove();
+    }
+    
+    firstContentBox.insertAdjacentHTML('afterend', html);
+}
+
+function selectTranscript(videoId, languageCode, languageName) {
+    const selectionBox = document.getElementById('transcript-selection-box');
+    
+    if (selectionBox) {
+        selectionBox.innerHTML = '<h3>⏳ Extracting transcript in ' + languageName + '...</h3>';
+    }
+    
+    fetch(`/get/transcript/${videoId}/${languageCode}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('✓ Transcript in ' + languageName + ' extracted successfully! Refreshing page...');
+            window.location.reload();
+        } else {
+            alert('✗ Error: ' + data.error);
+            if (selectionBox) {
+                selectionBox.remove();
+            }
+        }
+    })
+    .catch(error => {
+        alert('✗ Network error: ' + error);
+        if (selectionBox) {
+            selectionBox.remove();
+        }
+    });
+}
+
+function retrySummary(videoId) {
+    const btn = document.getElementById('retry-summary-btn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Processing...';
+    
+    fetch(`/retry/summary/${videoId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('✓ Summary generated successfully! Refreshing page...');
+            window.location.reload();
+        } else {
+            alert('✗ Error: ' + data.error);
+            btn.disabled = false;
+            btn.textContent = '🔄 Generate Summary';
+        }
+    })
+    .catch(error => {
+        alert('✗ Network error: ' + error);
+        btn.disabled = false;
+        btn.textContent = '🔄 Generate Summary';
+    });
+}
+</script>
