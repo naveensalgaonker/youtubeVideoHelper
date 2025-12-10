@@ -201,9 +201,8 @@ class Database:
                 separator = '&' if '?' in db_url else '?'
                 db_url = f"{db_url}{separator}sslmode=require"
             
-            conn = psycopg2.connect(db_url)
+            conn = psycopg2.connect(db_url, cursor_factory=psycopg2.extras.RealDictCursor)
             conn.set_session(autocommit=False)
-            # Use RealDictCursor for dict-like row access
             try:
                 yield conn
             finally:
