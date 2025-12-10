@@ -194,7 +194,14 @@ class Database:
     def _get_connection(self):
         """Context manager for database connections."""
         if self.is_postgres:
-            conn = psycopg2.connect(self.db_url)
+            # Supabase and other cloud PostgreSQL providers require SSL
+            # Parse connection string and add sslmode if not present
+            db_url = self.db_url
+            if 'sslmode=' not in db_url:
+                separator = '&' if '?' in db_url else '?'
+                db_url = f"{db_url}{separator}sslmode=require"
+            
+            conn = psycopg2.connect(db_url)
             conn.set_session(autocommit=False)
             # Use RealDictCursor for dict-like row access
             try:
